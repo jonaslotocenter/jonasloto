@@ -10,11 +10,11 @@ export const metadata: Metadata = {
   description: 'Le centre de loterie le plus fiable en Haïti. Jouez en ligne ou chez nos agents agréés. Borlette, Loto 3, Loto 4, Loto 5, Marriage – New York, Florida, Georgia.',
   keywords: ['loto haiti', 'borlette', 'loterie haiti', 'jonas loto', 'loto en ligne', 'tirage loto'],
   authors: [{ name: 'Jonas Loto Center' }],
-  metadataBase: new URL('https://jonaslotocenter.com'),
+  metadataBase: new URL('https://jonaslotocenter.vercel.app'),
   openGraph: {
     title: 'Jonas Loto Center | #1 Loterie en Haïti',
     description: 'Le centre de loterie le plus fiable en Haïti. Jouez en ligne ou chez nos agents agréés.',
-    url: 'https://jonaslotocenter.com',
+    url: 'https://jonaslotocenter.vercel.app',
     siteName: 'Jonas Loto Center',
     locale: 'fr_HT',
     type: 'website',

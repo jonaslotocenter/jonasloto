@@ -9,6 +9,6 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ['/admin', '/pos', '/supervisor', '/otp', '/profile'],
       },
     ],
-    sitemap: 'https://jonaslotocenter.com/sitemap.xml',
+    sitemap: 'https://jonaslotocenter.vercel.app/sitemap.xml',
   };
 }
