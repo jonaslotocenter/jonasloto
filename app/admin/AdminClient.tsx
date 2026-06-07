@@ -57,7 +57,6 @@ export default function AdminClient() {
     };
 
     fetchData();
-// ... (rest of useEffect)
   }, []);
 
   const handleVerify = async (uid: string, status: 'active' | 'rejected') => {
@@ -68,8 +67,14 @@ export default function AdminClient() {
     }
   };
 
-  const chartData = [
-// ... (chartData)
+  const chartData: { name: string; sales: number }[] = [
+    { name: 'Lun', sales: 4200 },
+    { name: 'Mar', sales: 3800 },
+    { name: 'Mer', sales: 5100 },
+    { name: 'Jeu', sales: 4700 },
+    { name: 'Ven', sales: 6200 },
+    { name: 'Sam', sales: 8900 },
+    { name: 'Dim', sales: 7400 },
   ];
 
   return (
@@ -361,7 +366,6 @@ export default function AdminClient() {
       )}
 
       {activeTab === 'draws' && (
-// ... (draws content)
         <div className="card overflow-hidden">
           <div className="flex items-center justify-between mb-8 p-6">
             <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase italic tracking-tighter flex items-center gap-2">
