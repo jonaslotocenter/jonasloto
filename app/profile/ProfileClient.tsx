@@ -10,8 +10,8 @@ import {
   Edit2, Save, X, AlertCircle, ShieldCheck, CheckCircle2,
   ArrowDownCircle, ArrowRightLeft, Key, Settings
 } from 'lucide-react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -46,13 +46,13 @@ export default function ProfileClient() {
         // Mandatory OTP check for every session
         const isVerified = sessionStorage.getItem('otp_verified') === 'true';
         if (!isVerified) {
-          router.push('/otp', { state: { email: currentUser.email, userId: currentUser.id } });
+          router.push(`/otp?email=${encodeURIComponent(currentUser.email!)}&userId=${currentUser.id}`);
           return;
         }
         fetchUserData(currentUser.id);
       }
     });
-  }, [navigate]);
+  }, [router]);
 
   const fetchUserData = async (uid: string) => {
     const { data } = await supabase.from('users').select('*').eq('uid', uid).single();
@@ -173,7 +173,7 @@ export default function ProfileClient() {
         // Redirect to OTP verification if not already verified
         const isVerified = sessionStorage.getItem('otp_verified') === 'true';
         if (!isVerified) {
-          router.push('/otp', { state: { email: currentEmail, userId: currentUserId } });
+          router.push(`/otp?email=${encodeURIComponent(currentEmail)}&userId=${currentUserId}`);
         } else {
           fetchUserData(currentUserId!);
         }
@@ -187,7 +187,7 @@ export default function ProfileClient() {
 
         if (authData.user) {
           // Redirect to OTP verification
-          router.push('/otp', { state: { email, userId: authData.user.id } });
+          router.push(`/otp?email=${encodeURIComponent(email)}&userId=${authData.user.id}`);
         }
       }
     } catch (err: any) {
