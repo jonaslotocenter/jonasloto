@@ -7,7 +7,7 @@ import {
   Key, Mail, ArrowRight, AlertCircle, 
   CheckCircle2, RefreshCw, Smartphone
 } from 'lucide-react';
-import { useLocation, useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import Logo from '@/components/Logo';
 
