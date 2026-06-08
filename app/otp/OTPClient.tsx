@@ -4,8 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'motion/react';
 import { 
-  Key, Mail, ArrowRight, AlertCircle, 
-  CheckCircle2, RefreshCw, Smartphone
+  AlertCircle, CheckCircle2, RefreshCw
 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -13,123 +12,89 @@ import Logo from '@/components/Logo';
 
 export default function OTPClient() {
   const { t } = useTranslation();
-  
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const email = searchParams.get('email');
+
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resending, setResending] = useState(false);
-  const [timer, setTimer] = useState(600); // 10 minutes
-
-  const searchParams = useSearchParams();
-  const email = searchParams.get('email');
-  const userId = searchParams.get('userId');
+  const [timer, setTimer] = useState(600);
+  const [sent, setSent] = useState(false);
 
   useEffect(() => {
-    if (!email || !userId) {
+    if (!email) {
       router.push('/profile');
       return;
     }
-
-    // Start countdown
+    // Supabase a déjà envoyé l'OTP lors du signUp/signIn
+    // On démarre juste le timer
+    setSent(true);
     const interval = setInterval(() => {
       setTimer(prev => (prev > 0 ? prev - 1 : 0));
     }, 1000);
-
-    // Initial OTP send
-    sendOTP();
-
     return () => clearInterval(interval);
-  }, []);
+  }, [email, router]);
 
-  const sendOTP = async () => {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-
+  const handleResend = async () => {
+    if (!email) return;
+    setResending(true);
+    setError(null);
     try {
-      // Store OTP in Supabase
-      const { error: otpError } = await supabase.from('otps').insert({
-        userId,
-        code,
-        type: 'email',
-        expiresAt
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email,
       });
-
-      if (otpError) throw otpError;
-
-      // Send OTP via backend
-      const response = await fetch('/api/auth/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code })
-      });
-
-      if (!response.ok) throw new Error('Failed to send OTP email');
-
+      if (error) throw error;
+      setTimer(600);
     } catch (err: any) {
-      console.error('OTP Send Error:', err);
-      setError('Impossible d\'envoyer le code. Veuillez réessayer.');
+      setError(err.message);
+    } finally {
+      setResending(false);
     }
   };
 
-  const handleResend = async () => {
-    setResending(true);
-    await sendOTP();
-    setTimer(600);
-    setResending(false);
-  };
-
   const handleChange = (index: number, value: string) => {
+    if (!/^\d*$/.test(value)) return;
     if (value.length > 1) return;
     const newOtp = [...otp];
     newOtp[index] = value;
     setOtp(newOtp);
-
-    // Auto-focus next input
     if (value && index < 5) {
-      const nextInput = document.getElementById(`otp-${index + 1}`);
-      nextInput?.focus();
+      document.getElementById(`otp-${index + 1}`)?.focus();
     }
   };
 
   const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
     if (e.key === 'Backspace' && !otp[index] && index > 0) {
-      const prevInput = document.getElementById(`otp-${index - 1}`);
-      prevInput?.focus();
+      document.getElementById(`otp-${index - 1}`)?.focus();
     }
   };
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    const code = otp.join('');
-    if (code.length < 6) return;
+    const token = otp.join('');
+    if (token.length < 6 || !email) return;
 
     setLoading(true);
     setError(null);
 
     try {
-      const { data, error: verifyError } = await supabase
-        .from('otps')
-        .select('*')
-        .eq('userId', userId)
-        .eq('code', code)
-        .gt('expiresAt', new Date().toISOString())
-        .single();
+      // Vérifier l'OTP via Supabase Auth
+      const { error } = await supabase.auth.verifyOtp({
+        email,
+        token,
+        type: 'email',
+      });
 
-      if (verifyError || !data) {
-        throw new Error(t('invalid_otp'));
-      }
+      if (error) throw error;
 
-      // Mark OTP as used (optional, or just delete)
-      await supabase.from('otps').delete().eq('id', data.id);
-
-      // Set session verification flag
+      // Marquer la session comme vérifiée
       sessionStorage.setItem('otp_verified', 'true');
-
-      // Successfully verified
       router.push('/profile');
     } catch (err: any) {
-      setError(err.message);
+      setError(t('invalid_otp'));
     } finally {
       setLoading(false);
     }
@@ -168,6 +133,7 @@ export default function OTPClient() {
                   key={i}
                   id={`otp-${i}`}
                   type="text"
+                  inputMode="numeric"
                   maxLength={1}
                   value={digit}
                   onChange={(e) => handleChange(i, e.target.value)}
