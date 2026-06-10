@@ -43,11 +43,15 @@ export default function ProfileClient() {
       setUser(currentUser);
       
       if (currentUser) {
-        // Mandatory OTP check for every session
+        // Skip OTP for Google OAuth users
+        const isGoogleUser = currentUser.app_metadata?.provider === 'google';
         const isVerified = sessionStorage.getItem('otp_verified') === 'true';
-        if (!isVerified) {
+        if (!isVerified && !isGoogleUser) {
           router.push(`/otp?email=${encodeURIComponent(currentUser.email!)}&userId=${currentUser.id}`);
           return;
+        }
+        if (isGoogleUser) {
+          sessionStorage.setItem('otp_verified', 'true');
         }
         fetchUserData(currentUser.id);
       }
@@ -187,7 +191,13 @@ export default function ProfileClient() {
 
         if (authData.user) {
           // Redirect to OTP verification
-          router.push(`/otp?email=${encodeURIComponent(email)}&userId=${authData.user.id}`);
+          const isGoogleUser = authData.user.app_metadata?.provider === 'google';
+          if (isGoogleUser) {
+            sessionStorage.setItem('otp_verified', 'true');
+            fetchUserData(authData.user.id);
+          } else {
+            router.push(`/otp?email=${encodeURIComponent(email)}&userId=${authData.user.id}`);
+          }
         }
       }
     } catch (err: any) {
