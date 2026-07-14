@@ -2,20 +2,30 @@
 
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { 
   User as UserIcon, Mail, Lock, History, Star, 
   Smartphone, LogOut, ChevronRight, Ticket, 
   Wallet, PlusCircle, ArrowUpCircle, Calendar, 
   Edit2, Save, X, AlertCircle, ShieldCheck, CheckCircle2,
-  ArrowDownCircle, ArrowRightLeft, Key, Settings
+  ArrowDownCircle, Settings, Building2
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
-import { format, parseISO } from 'date-fns';
-import { fr } from 'date-fns/locale';
 import Logo from '@/components/Logo';
+
+// Admin emails - auto-assigned admin role
+const ADMIN_EMAILS = ['jonas.lotos.67@gmail.com', 'jonasrosier67@gmail.com'];
+
+// Role options shown at signup
+const ROLE_OPTIONS = [
+  { value: 'client', label: 'Client', desc: 'Joueur — acheter des billets et suivre vos gains', icon: '🎟️' },
+  { value: 'agent', label: 'Agent', desc: 'Vendeur agréé — vendre des billets pour le compte de Jonas Loto', icon: '🏪' },
+  { value: 'supervisor', label: 'Superviseur', desc: 'Superviser les agents de votre zone', icon: '👁️' },
+  { value: 'director', label: 'Directeur de Centrale', desc: 'Diriger une centrale de loterie (Florida, New York ou Georgia)', icon: '🏛️' },
+  { value: 'moderator', label: 'Admin / Modérateur', desc: 'Gérer la plateforme (requiert approbation)', icon: '🛡️' },
+];
 
 export default function ProfileClient() {
   const { t } = useTranslation();
@@ -36,6 +46,7 @@ export default function ProfileClient() {
   const [idNumber, setIdNumber] = useState('');
   const [idPhotoFront, setIdPhotoFront] = useState<File | null>(null);
   const [idPhotoBack, setIdPhotoBack] = useState<File | null>(null);
+  const [selectedRole, setSelectedRole] = useState('client');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -43,7 +54,6 @@ export default function ProfileClient() {
       setUser(currentUser);
       
       if (currentUser) {
-        // Skip OTP for Google OAuth users
         const isGoogleUser = currentUser.app_metadata?.provider === 'google';
         const isVerified = sessionStorage.getItem('otp_verified') === 'true';
         if (!isVerified && !isGoogleUser) {
@@ -63,8 +73,6 @@ export default function ProfileClient() {
     if (data) {
       setUserData(data);
     } else {
-      // If no user data found, it means it's a new signup (e.g. Google)
-      // We need to show the "Complete Profile" form
       setAuthMode('signup');
     }
   };
@@ -73,17 +81,9 @@ export default function ProfileClient() {
     const fileExt = file.name.split('.').pop();
     const fileName = `${Math.random()}.${fileExt}`;
     const filePath = `${path}/${fileName}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('verification-docs')
-      .upload(filePath, file);
-
+    const { error: uploadError } = await supabase.storage.from('verification-docs').upload(filePath, file);
     if (uploadError) throw uploadError;
-
-    const { data: { publicUrl } } = supabase.storage
-      .from('verification-docs')
-      .getPublicUrl(filePath);
-
+    const { data: { publicUrl } } = supabase.storage.from('verification-docs').getPublicUrl(filePath);
     return publicUrl;
   };
 
@@ -93,9 +93,7 @@ export default function ProfileClient() {
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: {
-          redirectTo: window.location.origin + '/profile'
-        }
+        options: { redirectTo: window.location.origin + '/profile' }
       });
       if (error) throw error;
     } catch (err: any) {
@@ -116,21 +114,10 @@ export default function ProfileClient() {
         const today = new Date();
         let age = today.getFullYear() - birthDate.getFullYear();
         const m = today.getMonth() - birthDate.getMonth();
-        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-          age--;
-        }
-
-        if (age < 18) {
-          throw new Error("Vous devez avoir au moins 18 ans pour vous inscrire.");
-        }
-
-        if (!idPhotoFront) {
-          throw new Error("La photo de la pièce d'identité est requise.");
-        }
-
-        if (idType !== 'passport' && !idPhotoBack) {
-          throw new Error("Le verso de la pièce d'identité est requis.");
-        }
+        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
+        if (age < 18) throw new Error("Vous devez avoir au moins 18 ans pour vous inscrire.");
+        if (!idPhotoFront) throw new Error("La photo de la pièce d'identité est requise.");
+        if (idType !== 'passport' && !idPhotoBack) throw new Error("Le verso de la pièce d'identité est requis.");
 
         let currentUserId = user?.id;
         let currentEmail = user?.email || email;
@@ -141,10 +128,8 @@ export default function ProfileClient() {
             password,
             options: { data: { full_name: fullName } }
           });
-
           if (authError) throw authError;
           if (!authData.user) throw new Error("Erreur lors de l'inscription.");
-          
           currentUserId = authData.user.id;
           currentEmail = authData.user.email!;
         }
@@ -152,29 +137,35 @@ export default function ProfileClient() {
         // Upload photos
         const frontUrl = await uploadFile(idPhotoFront, currentUserId!);
         let backUrl = null;
-        if (idPhotoBack) {
-          backUrl = await uploadFile(idPhotoBack, currentUserId!);
+        if (idPhotoBack) backUrl = await uploadFile(idPhotoBack, currentUserId!);
+
+        // Determine role — auto-admin for owner emails
+        let finalRole = selectedRole;
+        let finalStatus = 'pending_verification';
+        if (ADMIN_EMAILS.includes(currentEmail)) {
+          finalRole = 'admin';
+          finalStatus = 'active';
+        } else if (selectedRole === 'client') {
+          finalStatus = 'active';
         }
 
-        // Create user profile in 'users' table
         const { error: profileError } = await supabase.from('users').insert({
           uid: currentUserId,
           email: currentEmail,
-          displayName: fullName,
-          phoneNumber: phone,
-          dateOfBirth: dob,
-          idType,
-          idNumber,
-          idPhotoFront: frontUrl,
-          idPhotoBack: backUrl,
-          role: 'client',
-          status: 'pending_verification',
-          balance: 0
+          "displayName": fullName,
+          "phoneNumber": phone,
+          "dateOfBirth": dob,
+          "idType": idType,
+          "idNumber": idNumber,
+          "idPhotoFront": frontUrl,
+          "idPhotoBack": backUrl,
+          role: finalRole,
+          status: finalStatus,
+          balance: 0,
         });
 
         if (profileError) throw profileError;
         
-        // Redirect to OTP verification if not already verified
         const isVerified = sessionStorage.getItem('otp_verified') === 'true';
         if (!isVerified) {
           router.push(`/otp?email=${encodeURIComponent(currentEmail)}&userId=${currentUserId}`);
@@ -182,15 +173,9 @@ export default function ProfileClient() {
           fetchUserData(currentUserId!);
         }
       } else {
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email,
-          password
-        });
-
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
         if (authError) throw authError;
-
         if (authData.user) {
-          // Redirect to OTP verification
           const isGoogleUser = authData.user.app_metadata?.provider === 'google';
           if (isGoogleUser) {
             sessionStorage.setItem('otp_verified', 'true');
@@ -213,6 +198,16 @@ export default function ProfileClient() {
     setUserData(null);
   };
 
+  // Role badge colors
+  const roleBadgeColor: Record<string, string> = {
+    admin: 'bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400',
+    moderator: 'bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400',
+    director: 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400',
+    supervisor: 'bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400',
+    agent: 'bg-green-50 text-green-600 dark:bg-green-500/10 dark:text-green-400',
+    client: 'bg-primary/5 text-primary dark:bg-secondary/5 dark:text-secondary',
+  };
+
   if (user && userData) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-12">
@@ -230,16 +225,21 @@ export default function ProfileClient() {
                 </h2>
                 <p className="text-slate-400 text-sm font-medium">{userData.email}</p>
                 <div className="mt-4 flex flex-col items-center gap-2">
-                  <div className="inline-flex items-center gap-2 px-4 py-1 bg-primary/5 text-primary rounded-full text-[10px] font-black uppercase tracking-widest dark:bg-secondary/5 dark:text-secondary">
-                    <ShieldCheck size={14} /> {t(`role_${userData.role}`)}
+                  <div className={`inline-flex items-center gap-2 px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${roleBadgeColor[userData.role] || roleBadgeColor.client}`}>
+                    <ShieldCheck size={14} /> {userData.role}
                   </div>
+                  {userData.central && (
+                    <div className="inline-flex items-center gap-2 px-4 py-1 bg-blue-50 text-blue-600 rounded-full text-[10px] font-black uppercase tracking-widest dark:bg-blue-500/10 dark:text-blue-400">
+                      <Building2 size={14} /> Centrale {userData.central}
+                    </div>
+                  )}
                   {userData.status === 'pending_verification' && (
-                    <div className="inline-flex items-center gap-2 px-4 py-1 bg-amber-50 text-amber-600 rounded-full text-[10px] font-black uppercase tracking-widest dark:bg-amber-500/10 dark:text-amber-500">
+                    <div className="inline-flex items-center gap-2 px-4 py-1 bg-amber-50 text-amber-600 rounded-full text-[10px] font-black uppercase tracking-widest">
                       <AlertCircle size={14} /> En attente de vérification
                     </div>
                   )}
                   {userData.status === 'rejected' && (
-                    <div className="inline-flex items-center gap-2 px-4 py-1 bg-accent/5 text-accent rounded-full text-[10px] font-black uppercase tracking-widest dark:bg-accent/10 dark:text-accent">
+                    <div className="inline-flex items-center gap-2 px-4 py-1 bg-accent/5 text-accent rounded-full text-[10px] font-black uppercase tracking-widest">
                       <X size={14} /> Vérification rejetée
                     </div>
                   )}
@@ -301,48 +301,12 @@ export default function ProfileClient() {
                 <h2 className="text-2xl font-black text-primary dark:text-secondary uppercase italic tracking-tighter flex items-center gap-3">
                   <History /> {t('transaction_history')}
                 </h2>
-                <Link href="/buy" className="text-xs font-black text-accent uppercase tracking-widest hover:underline">
+                <Link href="/buy-ticket" className="text-xs font-black text-accent uppercase tracking-widest hover:underline">
                   Nouvel Achat
                 </Link>
               </div>
-
-              <div className="space-y-4">
-                {/* Mock transactions for now */}
-                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 dark:bg-dark-bg dark:border-dark-border">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-green-50 text-green-600 rounded-xl flex items-center justify-center dark:bg-green-500/10">
-                      <ArrowUpCircle size={20} />
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-slate-900 dark:text-white">Dépôt MonCash</div>
-                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">12 Mars 2026 • 14:30</div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-black text-green-600">+ 2,500 HTG</div>
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Réussi</div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 dark:bg-dark-bg dark:border-dark-border">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center dark:bg-blue-500/10">
-                      <Ticket size={20} />
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-slate-900 dark:text-white">Achat Billet New York</div>
-                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">10 Mars 2026 • 09:15</div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-black text-slate-900 dark:text-white">- 150 HTG</div>
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Billet #NY-882</div>
-                  </div>
-                </div>
-
-                <div className="text-center py-12">
-                  <p className="text-slate-400 text-sm font-medium italic">Plus de transactions seront affichées ici.</p>
-                </div>
+              <div className="text-center py-12">
+                <p className="text-slate-400 text-sm font-medium italic">Aucune transaction pour le moment.</p>
               </div>
             </div>
 
@@ -350,31 +314,11 @@ export default function ProfileClient() {
               <h2 className="text-2xl font-black text-primary dark:text-secondary uppercase italic tracking-tighter mb-8 flex items-center gap-3">
                 <Star /> Mes Billets Actifs
               </h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="p-6 bg-primary/5 rounded-3xl border border-primary/10 relative overflow-hidden dark:bg-secondary/5 dark:border-secondary/10">
-                  <div className="absolute top-0 right-0 p-2 bg-primary text-white text-[8px] font-black uppercase dark:bg-secondary dark:text-primary">New York</div>
-                  <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">ID: #NY-882</div>
-                  <div className="flex gap-2 mb-6">
-                    {['12', '45', '88'].map(n => (
-                      <div key={n} className="w-10 h-10 bg-white rounded-full flex items-center justify-center font-black text-primary shadow-sm dark:bg-dark-bg dark:text-secondary">{n}</div>
-                    ))}
-                  </div>
-                  <div className="flex justify-between items-end">
-                    <div>
-                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Mise</div>
-                      <div className="text-lg font-black text-primary dark:text-secondary">150 HTG</div>
-                    </div>
-                    <div className="text-[10px] font-black text-green-500 uppercase tracking-widest">En attente</div>
-                  </div>
-                </div>
-                
-                <div className="flex items-center justify-center border-2 border-dashed border-slate-100 rounded-3xl p-8 dark:border-dark-border">
-                  <Link href="/buy" className="text-slate-400 hover:text-primary transition-all flex flex-col items-center gap-2">
-                    <PlusCircle size={32} />
-                    <span className="text-xs font-black uppercase tracking-widest">Nouveau Billet</span>
-                  </Link>
-                </div>
+              <div className="flex items-center justify-center border-2 border-dashed border-slate-100 rounded-3xl p-12 dark:border-dark-border">
+                <Link href="/buy-ticket" className="text-slate-400 hover:text-primary transition-all flex flex-col items-center gap-2">
+                  <PlusCircle size={32} />
+                  <span className="text-xs font-black uppercase tracking-widest">Acheter un billet</span>
+                </Link>
               </div>
             </div>
           </div>
@@ -388,7 +332,7 @@ export default function ProfileClient() {
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="max-w-md w-full"
+        className="max-w-lg w-full"
       >
         <div className="text-center mb-10">
           <div className="inline-block mb-6">
@@ -406,102 +350,87 @@ export default function ProfileClient() {
 
         <div className="card p-8 md:p-10">
           <form onSubmit={handleAuth} className="space-y-6">
+
+            {/* ROLE SELECTOR — only on signup */}
+            {authMode === 'signup' && !user && (
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Je m'inscris en tant que</label>
+                <div className="grid grid-cols-1 gap-3">
+                  {ROLE_OPTIONS.map((role) => (
+                    <button
+                      key={role.value}
+                      type="button"
+                      onClick={() => setSelectedRole(role.value)}
+                      className={`flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all ${
+                        selectedRole === role.value
+                          ? 'border-primary bg-primary/5 dark:border-secondary dark:bg-secondary/5'
+                          : 'border-slate-100 hover:border-slate-200 dark:border-dark-border dark:hover:border-dark-border/80'
+                      }`}
+                    >
+                      <span className="text-2xl">{role.icon}</span>
+                      <div>
+                        <div className="font-black text-slate-900 dark:text-white text-sm">{role.label}</div>
+                        <div className="text-xs text-slate-400 font-medium">{role.desc}</div>
+                      </div>
+                      {selectedRole === role.value && (
+                        <CheckCircle2 size={18} className="ml-auto text-primary dark:text-secondary shrink-0" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+
+              </div>
+            )}
+
             {authMode === 'signup' && (
               <>
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{t('full_name')}</label>
                   <div className="relative">
                     <UserIcon size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input 
-                      type="text" 
-                      placeholder="Jean Dupont"
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      className="input-field pl-12"
-                      required
-                    />
+                    <input type="text" placeholder="Jean Dupont" value={fullName} onChange={(e) => setFullName(e.target.value)} className="input-field pl-12" required />
                   </div>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{t('phone')}</label>
                   <div className="relative">
                     <Smartphone size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input 
-                      type="tel" 
-                      placeholder="1234 5678 (Code pays optionnel)"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      className="input-field pl-12"
-                      required
-                    />
+                    <input type="tel" placeholder="+509 1234 5678" value={phone} onChange={(e) => setPhone(e.target.value)} className="input-field pl-12" required />
                   </div>
                 </div>
-
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Date de Naissance</label>
                   <div className="relative">
                     <Calendar size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input 
-                      type="date" 
-                      value={dob}
-                      onChange={(e) => setDob(e.target.value)}
-                      className="input-field pl-12"
-                      required
-                    />
+                    <input type="date" value={dob} onChange={(e) => setDob(e.target.value)} className="input-field pl-12" required />
                   </div>
                 </div>
-
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Type de Pièce</label>
-                  <select 
-                    value={idType}
-                    onChange={(e) => setIdType(e.target.value as any)}
-                    className="input-field"
-                    required
-                  >
+                  <select value={idType} onChange={(e) => setIdType(e.target.value as any)} className="input-field" required>
                     <option value="cin">Carte d'Identification Nationale (CIN)</option>
                     <option value="license">Permis de Conduire</option>
                     <option value="passport">Passeport</option>
                   </select>
                 </div>
-
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                     {idType === 'passport' ? 'Numéro de Passeport' : idType === 'license' ? 'NIF' : 'CIN'}
                   </label>
-                  <input 
-                    type="text" 
-                    placeholder="Numéro de la pièce"
-                    value={idNumber}
-                    onChange={(e) => setIdNumber(e.target.value)}
-                    className="input-field"
-                    required
-                  />
+                  <input type="text" placeholder="Numéro de la pièce" value={idNumber} onChange={(e) => setIdNumber(e.target.value)} className="input-field" required />
                 </div>
-
                 <div className="grid grid-cols-1 gap-4">
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                       {idType === 'passport' ? 'Photo de la première page' : 'Photo Recto'}
                     </label>
-                    <input 
-                      type="file" 
-                      accept="image/*"
-                      onChange={(e) => setIdPhotoFront(e.target.files?.[0] || null)}
-                      className="input-field py-2 text-xs"
-                      required
-                    />
+                    <input type="file" accept="image/*" onChange={(e) => setIdPhotoFront(e.target.files?.[0] || null)} className="input-field py-2 text-xs" required />
                   </div>
                   {idType !== 'passport' && (
                     <div className="space-y-1">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Photo Verso</label>
-                      <input 
-                        type="file" 
-                        accept="image/*"
-                        onChange={(e) => setIdPhotoBack(e.target.files?.[0] || null)}
-                        className="input-field py-2 text-xs"
-                        required
-                      />
+                      <input type="file" accept="image/*" onChange={(e) => setIdPhotoBack(e.target.files?.[0] || null)} className="input-field py-2 text-xs" required />
                     </div>
                   )}
                 </div>
@@ -514,29 +443,14 @@ export default function ProfileClient() {
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{t('email')}</label>
                   <div className="relative">
                     <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input 
-                      type="email" 
-                      placeholder="votre@email.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="input-field pl-12"
-                      required
-                    />
+                    <input type="email" placeholder="votre@email.com" value={email} onChange={(e) => setEmail(e.target.value)} className="input-field pl-12" required />
                   </div>
                 </div>
-
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{t('password')}</label>
                   <div className="relative">
                     <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input 
-                      type="password" 
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="input-field pl-12"
-                      required
-                    />
+                    <input type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} className="input-field pl-12" required />
                   </div>
                 </div>
               </>
@@ -548,11 +462,7 @@ export default function ProfileClient() {
               </div>
             )}
 
-            <button 
-              type="submit" 
-              disabled={loading}
-              className="w-full btn-primary py-4 text-lg flex items-center justify-center gap-2"
-            >
+            <button type="submit" disabled={loading} className="w-full btn-primary py-4 text-lg flex items-center justify-center gap-2">
               {loading ? (
                 <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
               ) : (
@@ -566,16 +476,11 @@ export default function ProfileClient() {
 
           {!user && (
             <>
-              <div className="relative my-10">
+              <div className="relative my-8">
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-100 dark:border-dark-border"></div></div>
                 <div className="relative flex justify-center text-[10px] font-black uppercase tracking-widest"><span className="bg-white px-4 text-slate-300 dark:bg-dark-surface">Ou</span></div>
               </div>
-
-              <button 
-                onClick={handleGoogleLogin}
-                disabled={loading}
-                className="w-full py-4 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-all flex items-center justify-center gap-3 dark:border-dark-border dark:text-slate-400 dark:hover:bg-dark-bg"
-              >
+              <button onClick={handleGoogleLogin} disabled={loading} className="w-full py-4 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-all flex items-center justify-center gap-3 dark:border-dark-border dark:text-slate-400 dark:hover:bg-dark-bg">
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                   <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -587,16 +492,9 @@ export default function ProfileClient() {
             </>
           )}
 
-          <button 
-            onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
-            className="w-full py-4 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-all flex items-center justify-center gap-2 dark:border-dark-border dark:text-slate-400 dark:hover:bg-dark-bg"
-          >
+          <button onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')} className="w-full mt-4 py-4 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-all flex items-center justify-center gap-2 dark:border-dark-border dark:text-slate-400 dark:hover:bg-dark-bg">
             {authMode === 'login' ? t('signup') : t('login')}
           </button>
-          
-          <p className="text-center mt-8 text-[10px] text-slate-400 uppercase tracking-widest font-bold">
-            {t('any_email_hint')}
-          </p>
         </div>
       </motion.div>
     </div>
