@@ -134,11 +134,6 @@ export default function ProfileClient() {
           currentEmail = authData.user.email!;
         }
 
-        // Upload photos
-        const frontUrl = await uploadFile(idPhotoFront, currentUserId!);
-        let backUrl = null;
-        if (idPhotoBack) backUrl = await uploadFile(idPhotoBack, currentUserId!);
-
         // Determine role — auto-admin for owner emails
         let finalRole = selectedRole;
         let finalStatus = 'pending_verification';
@@ -149,7 +144,13 @@ export default function ProfileClient() {
           finalStatus = 'active';
         }
 
-        const { error: profileError } = await supabase.from('users').insert({
+        // Upload photos
+        const frontUrl = await uploadFile(idPhotoFront!, currentUserId!);
+        let backUrl = null;
+        if (idPhotoBack) backUrl = await uploadFile(idPhotoBack, currentUserId!);
+
+        // Use upsert to avoid duplicate key errors
+        const { error: profileError } = await supabase.from('users').upsert({
           uid: currentUserId,
           email: currentEmail,
           "displayName": fullName,
@@ -162,22 +163,24 @@ export default function ProfileClient() {
           role: finalRole,
           status: finalStatus,
           balance: 0,
-        });
+        }, { onConflict: 'uid' });
 
         if (profileError) throw profileError;
-        
-        const isVerified = sessionStorage.getItem('otp_verified') === 'true';
-        if (!isVerified) {
-          router.push(`/otp?email=${encodeURIComponent(currentEmail)}&userId=${currentUserId}`);
-        } else {
+
+        const isAdminEmail = ADMIN_EMAILS.includes(currentEmail);
+        if (isAdminEmail) {
+          sessionStorage.setItem('otp_verified', 'true');
           fetchUserData(currentUserId!);
+        } else {
+          router.push(`/otp?email=${encodeURIComponent(currentEmail)}&userId=${currentUserId}`);
         }
       } else {
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
         if (authError) throw authError;
         if (authData.user) {
           const isGoogleUser = authData.user.app_metadata?.provider === 'google';
-          if (isGoogleUser) {
+          const isAdminEmail = ADMIN_EMAILS.includes(email);
+          if (isGoogleUser || isAdminEmail) {
             sessionStorage.setItem('otp_verified', 'true');
             fetchUserData(authData.user.id);
           } else {
